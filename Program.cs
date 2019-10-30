@@ -51,8 +51,7 @@ namespace Auto_Recorder
                     catch
                     { }
 
-                if (handle == 0)
-                    processes = Process.GetProcessesByName("GameApp_PcDx11_x64Final");
+                processes = Process.GetProcessesByName("GameApp_PcDx11_x64Final");
 
                 if (processes.Length == 0)
                 {
@@ -82,7 +81,7 @@ namespace Auto_Recorder
                     {
                         if (raceFinish1 == 1 || raceFinish2 == 1)
                             ToggleRecording();
-                        if (raceState == 0)
+                        if (raceState < 5)
                             ToggleRecording();
                     }
                     else if (raceState == 5 || raceState == 6)
@@ -93,10 +92,17 @@ namespace Auto_Recorder
 
                 }
 
-                if (obs.IsConnected)
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label1.Text = "Current Status: Auto recording!"; });
+                if (obs.IsConnected && handle != 0)
+                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording enabled!"; });
+                else if (obs.IsConnected && handle == 0)
+                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording disabled: couldn't connect to the game!"; });
                 else
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label1.Text = "Current Status: Not auto recording (could not find OBS)"; });
+                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording disabled: couldn't connect to OBS!"; });
+
+                if (recording)
+                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "Recording!"; });
+                else
+                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "currently not recording"; });
 
                 Thread.Sleep(10);
             }

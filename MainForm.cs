@@ -16,5 +16,7 @@ namespace Auto_Recorder
         {
             InitializeComponent();
         }
+
+
     }
 }
