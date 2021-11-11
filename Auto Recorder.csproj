@@ -63,6 +63,7 @@
     <LangVersion>latest</LangVersion>
     <GenerateSerializationAssemblies>Off</GenerateSerializationAssemblies>
     <WarningLevel>0</WarningLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup>
     <NoWin32Manifest>true</NoWin32Manifest>
@@ -71,6 +72,7 @@
     <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Microsoft.VisualBasic" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>Libraries\Newtonsoft.Json.dll</HintPath>
     </Reference>
@@ -99,6 +101,11 @@
     <Compile Include="MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="MemoryTools\DeepPointer.cs" />
+    <Compile Include="MemoryTools\MemoryWatcher.cs" />
+    <Compile Include="MemoryTools\ProcessExtensions.cs" />
+    <Compile Include="MemoryTools\SignatureScanner.cs" />
+    <Compile Include="MemoryTools\WinAPI.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="MainForm.resx">
@@ -127,9 +134,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Resources\" />
-  </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -144,4 +149,7 @@
     <!-- the ILMergePath property points to the location of ILMerge.exe console application -->
     <Exec Command="$(ILMergeConsolePath) bin\Release\TSR_Auto_Recorder.exe  /out:bin\Release\TSR_Auto_Recorder_ok.exe bin\Release\Newtonsoft.Json.dll bin\Release\obs-websocket-dotnet.dll bin\Release\websocket-sharp.dll " />
   </Target>
+  <PropertyGroup>
+    <PostBuildEvent>ILMerge.exe /target:winexe /out:NEWExecutable.exe TSR_Auto_Recorder.exe Newtonsoft.Json.dll obs-websocket-dotnet.dll websocket-sharp.dll</PostBuildEvent>
+  </PropertyGroup>
 </Project>

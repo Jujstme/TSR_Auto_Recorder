@@ -1,39 +1,29 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using OBSWebsocketDotNet;
+using LiveSplit.ComponentUtil;
+using System.Reflection;
+using Microsoft.VisualBasic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Auto_Recorder
 {
-    static class Program
+    class Program
     {
-        [DllImport("kernel32")]
-        private static extern int OpenProcess(int dwDesiredAccess, int bInheritHandle, int dwProcessId);
+        private static MainForm MainForm = new MainForm();
+        private static OBSWebsocket obs = new OBSWebsocket();
+        private static Process game;
+        private static Watchers watchers;
 
-        [DllImport("kernel32.dll")]
-        private static extern bool ReadProcessMemory(int hProcess, Int64 lpBaseAddress, byte[] lpBuffer, int dwSize, int lpNumberOfBytesRead);
-
-        static Process[] processes;
-        static int handle = 0;
-        static OBSWebsocket obs = new OBSWebsocket();
-        static byte raceState;
-        static byte raceFinish1;
-        static byte raceFinish2;
-        static bool recording;
-
-        static MainForm MainForm = new MainForm();
-
-        static void Main()
+        private static void Main()
         {
-            obs.RecordingStateChanged += Obs_RecordingStateChanged;
-            obs.WSTimeout = TimeSpan.FromSeconds(2);
-
+            obs.WSTimeout = TimeSpan.FromSeconds(1);
             Task task = new Task(() => AutoRecordTask());
             task.Start();
-
             Application.EnableVisualStyles();
             Application.Run(MainForm);
         }
@@ -42,88 +32,135 @@ namespace Auto_Recorder
         {
             while (true)
             {
+                Thread.Sleep(15);
+
+                if (game == null || game.HasExited)
+                {
+                    if (!HookGameProcess())
+                    {
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording disabled: couldn't connect to the game!"; });
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "Currently not recording"; });
+                        continue;
+                    }
+                }
+
                 if (!obs.IsConnected)
+                {
                     try
                     {
                         obs.Connect("ws://127.0.0.1:4444", "");
-                        recording = obs.GetStreamingStatus().IsRecording;
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording enabled!"; });
+                        continue;
                     }
                     catch
-                    { }
-
-                processes = Process.GetProcessesByName("GameApp_PcDx11_x64Final");
-
-                if (processes.Length == 0)
-                {
-                    handle = 0;
-                    if (recording)
-                        ToggleRecording();
-                }
-                else if (handle == 0)
-                {
-                    if (processes[0].MainModule.ModuleMemorySize != 0x15E9D000)
                     {
-                        MessageBox.Show("You cannot use this autorecorder tool. Please ensure you are\n" +
-                                        "running the correct version of the game!", "TSR Auto Recorder", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        Environment.Exit(2);
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording disabled: couldn't connect to OBS!"; });
+                        continue;
                     }
-                    Thread.Sleep(2000);
-                    handle = OpenProcess(0x10, 0, processes[0].Id);
                 }
 
-                if (handle != 0)
+                try
                 {
-                    raceState = ReadByte(0x1410B1920);
-                    raceFinish1 = ReadByte(0x141136234);
-                    raceFinish2 = ReadByte(0x141129D24);
+                    obs.GetStreamingStatus();
+                }
+                catch
+                {
+                    var question = Interaction.InputBox("OBS WebSocket requires a password.\n\nPlease inpput the password and click OK\nor click \"Cancel\" to exit the program.", "TSR Auto Recorder", "password");
 
-                    if (recording)
-                    {
-                        if (raceFinish1 == 1 || raceFinish2 == 1)
-                            ToggleRecording();
-                        if (raceState < 5)
-                            ToggleRecording();
-                    }
-                    else if (raceState == 5 || raceState == 6)
-                    {
-                        Thread.Sleep(16);
-                        ToggleRecording();
-                    }
+                    if (question == "") Environment.Exit(0);
 
+                    try
+                    {
+                        obs.Authenticate(question, obs.GetAuthInfo());
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording enabled!"; });
+                    }
+                    catch (AuthFailureException)
+                    {
+                        obs.Disconnect();
+                    }
+                    continue;
                 }
 
-                if (obs.IsConnected && handle != 0)
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording enabled!"; });
-                else if (obs.IsConnected && handle == 0)
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording disabled: couldn't connect to the game!"; });
-                else
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label3.Text = "Auto recording disabled: couldn't connect to OBS!"; });
+                watchers.UpdateAll(game);
 
-                if (recording)
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "Recording!"; });
-                else
-                    MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "currently not recording"; });
+                if (obs.GetStreamingStatus().IsRecording)
+                {
+                    if (watchers.raceFinish1.Current == 1 || watchers.raceFinish2.Current == 1 || watchers.raceState.Current < 5) StopRecording();
+                }
+                else if (watchers.raceState.Current == 5 || watchers.raceState.Current == 6)
+                {
+                    StartRecording();
+                }
 
-                Thread.Sleep(10);
+                switch (obs.GetStreamingStatus().IsRecording)
+                {
+                    case true:
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "Recording!"; });
+                        break;
+                    case false:
+                        MainForm.BeginInvoke((MethodInvoker)delegate () { MainForm.label4.Text = "Currently not recording"; });
+                        break;
+                }
+            }
+        }
+
+        private static void StartRecording()
+        {
+            if (!obs.GetStreamingStatus().IsRecording)
+            {
+                obs.StartRecording();
+            }
+        }
+
+        private static void StopRecording()
+        {
+            if (obs.GetStreamingStatus().IsRecording)
+            {
+                obs.StopRecording();
             }
         }
              
-        private static void Obs_RecordingStateChanged(OBSWebsocket sender, OutputState type)
+        private static bool HookGameProcess()
         {
-            recording = (type == OutputState.Starting || type == OutputState.Started);
-        }
-
-        static void ToggleRecording()
-        {
-            if (obs.IsConnected)
-                obs.ToggleRecording();
-        }
-
-        static byte ReadByte(Int64 Address)
-        {
-            byte[] Bytes = new byte[1];
-            ReadProcessMemory(handle, Address, Bytes, 1, 0);
-            return Bytes[0];
+            game = Process.GetProcessesByName("GameApp_PcDx11_x64Final").OrderByDescending(x => x.StartTime).FirstOrDefault(x => !x.HasExited);
+            if (game == null) return false;
+            
+            try
+            {
+                watchers = new Watchers(game);
+            }
+            catch
+            {
+                game = null;
+                return false;
+            }
+            return true;
         }
     }
+
+    class Watchers : MemoryWatcherList
+    {
+        public MemoryWatcher<byte> raceState { get; }
+        public MemoryWatcher<byte> raceFinish1 { get; }
+        public MemoryWatcher<byte> raceFinish2 { get; }
+
+        public Watchers(Process game)
+        {
+            var scanner = new SignatureScanner(game, game.MainModuleWow64Safe().BaseAddress, game.MainModuleWow64Safe().ModuleMemorySize);
+            IntPtr ptr;
+
+            ptr = scanner.Scan(new SigScanTarget(1, "74 72 83 BE")); if (ptr == IntPtr.Zero) throw new Exception();
+            ptr = ptr + game.ReadValue<byte>(ptr) + 0x1 + 0x2;
+            this.raceState = new MemoryWatcher<byte>(new DeepPointer(ptr + 4 + game.ReadValue<int>(ptr))) { FailAction = MemoryWatcher.ReadFailAction.SetZeroOrNull };
+
+            ptr = scanner.Scan(new SigScanTarget(10, "48 8D 15 ???????? 48 8D 0D ???????? E8 ???????? 84 C0 0F 84 ???????? C7 46")); if (ptr == IntPtr.Zero) throw new Exception();
+            this.raceFinish1 = new MemoryWatcher<byte>(new DeepPointer(ptr + 4 + game.ReadValue<int>(ptr) + 0x4)) { FailAction = MemoryWatcher.ReadFailAction.SetZeroOrNull };
+
+            ptr = scanner.Scan(new SigScanTarget(10, "48 8B 15 ???????? 48 8D 0D ???????? E8 ???????? 84 C0 75 08 49 8B CE E8 ???????? 49 C7 46 ?????????? 66 0F 6F 0D")); if (ptr == IntPtr.Zero) throw new Exception();
+            this.raceFinish2 = new MemoryWatcher<byte>(new DeepPointer(ptr + 4 + game.ReadValue<int>(ptr) + 0x4)) { FailAction = MemoryWatcher.ReadFailAction.SetZeroOrNull };
+
+            this.AddRange(this.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Where(p => !p.GetIndexParameters().Any()).Select(p => p.GetValue(this, null) as MemoryWatcher).Where(p => p != null));
+        }
+    }
+
 }
